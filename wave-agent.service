@@ -1,0 +1,33 @@
+[Unit]
+Description=WAVE Edge Agent
+Documentation=https://docs.wave.online/hardware/agent
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/wave-agent --port 8080
+Restart=on-failure
+RestartSec=5
+User=root
+
+# Security hardening
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/etc/wave /var/lib/wave /var/log/wave /opt/wave /tmp/wave-video-bus
+PrivateTmp=true
+NoNewPrivileges=false
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=wave-agent
+
+# Environment
+Environment=WAVE_AGENT_VERSION=0.1.0
+Environment=WAVE_LOG_LEVEL=info
+
+[Install]
+WantedBy=multi-user.target
