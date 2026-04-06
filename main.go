@@ -1,5 +1,5 @@
 // WAVE Agent — Edge device management daemon
-// Single binary for Raspberry Pi, BirdDog PLAY, x86_64 servers
+// Single binary for Raspberry Pi, RK3328 SBC, x86_64 servers
 // Handles: device identity, module lifecycle, config, health, cloud sync
 package main
 

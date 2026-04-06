@@ -12,7 +12,7 @@ all: build-all
 # Build for all platforms
 build-all: build-arm64 build-armv7 build-amd64
 
-# Raspberry Pi 5, Pi Zero 2W (64-bit), BirdDog PLAY (RK3328)
+# Raspberry Pi 5, Pi Zero 2W (64-bit), RK3328 SBC
 build-arm64:
 	GOOS=linux GOARCH=arm64 go build -ldflags="$(LDFLAGS)" -o dist/$(BINARY)-linux-arm64 .
 
