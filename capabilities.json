@@ -1,0 +1,24 @@
+{
+  "schemaVersion": "1",
+  "repo": "wave-av/wave-agent",
+  "version": "0.3.0",
+  "lifecycle": "beta",
+  "planeLayer": 3,
+  "foundationPin": "v1",
+  "maintainers": [{ "team": "edge" }],
+  "exposes": {
+    "cli": [{ "binary": "wave-agent", "subcommands": ["enroll", "status", "stream", "logs"] }],
+    "hardwareDrivers": [
+      { "device": "birddog", "transport": "ethernet" },
+      { "device": "raspberry-pi", "transport": "ethernet" },
+      { "device": "wave-pebble", "transport": "ethernet" }
+    ]
+  },
+  "consumes": {
+    "waveProducts": [
+      { "repo": "wave-av/wave-gateway", "endpoint": "/v1/edge/enroll" }
+    ],
+    "foundationFrameworks": ["frameworks/protocol-plane", "frameworks/platform-registry"]
+  },
+  "tags": ["local", "public", "go", "daemon", "edge-device", "protocol-plane-layer-3"]
+}
