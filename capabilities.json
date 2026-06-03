@@ -1,13 +1,13 @@
 {
   "schemaVersion": "1",
   "repo": "wave-av/wave-agent",
-  "version": "0.3.0",
-  "lifecycle": "beta",
+  "version": "0.1.0",
+  "lifecycle": "alpha",
   "planeLayer": 3,
   "foundationPin": "v1",
   "maintainers": [{ "team": "edge" }],
   "exposes": {
-    "cli": [{ "binary": "wave-agent", "subcommands": ["enroll", "status", "stream", "logs"] }],
+    "cli": [{ "binary": "wave-agent", "subcommands": [] }],
     "hardwareDrivers": [
       { "device": "birddog", "transport": "ethernet" },
       { "device": "raspberry-pi", "transport": "ethernet" },
