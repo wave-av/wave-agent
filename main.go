@@ -46,13 +46,13 @@ type DeviceConfig struct {
 
 // ModuleState tracks running modules
 type ModuleState struct {
-	Name      string            `json:"name"`
-	Version   string            `json:"version"`
-	Status    string            `json:"status"` // running, stopped, error, installing
-	PID       int               `json:"pid,omitempty"`
-	Config    map[string]any    `json:"config,omitempty"`
-	Health    ModuleHealth      `json:"health"`
-	StartedAt *time.Time        `json:"started_at,omitempty"`
+	Name      string         `json:"name"`
+	Version   string         `json:"version"`
+	Status    string         `json:"status"` // running, stopped, error, installing
+	PID       int            `json:"pid,omitempty"`
+	Config    map[string]any `json:"config,omitempty"`
+	Health    ModuleHealth   `json:"health"`
+	StartedAt *time.Time     `json:"started_at,omitempty"`
 }
 
 type ModuleHealth struct {
@@ -178,9 +178,9 @@ func (a *Agent) InstallModule(name string) error {
 	installScript := filepath.Join(modulePath, "install.sh")
 
 	state := &ModuleState{
-		Name:    name,
-		Status:  "installing",
-		Config:  make(map[string]any),
+		Name:   name,
+		Status: "installing",
+		Config: make(map[string]any),
 		Health: ModuleHealth{
 			Status:    "unknown",
 			LastCheck: time.Now(),
