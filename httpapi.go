@@ -52,7 +52,9 @@ func (a *Agent) startHTTPServer(port int) *http.Server {
 			http.Error(w, "Method not allowed", 405)
 			return
 		}
-		var req struct{ Name string `json:"name"` }
+		var req struct {
+			Name string `json:"name"`
+		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, err.Error(), 400)
 			return
@@ -71,7 +73,9 @@ func (a *Agent) startHTTPServer(port int) *http.Server {
 			http.Error(w, "Method not allowed", 405)
 			return
 		}
-		var req struct{ Name string `json:"name"` }
+		var req struct {
+			Name string `json:"name"`
+		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, err.Error(), 400)
 			return

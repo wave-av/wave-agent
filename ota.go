@@ -25,7 +25,7 @@ const (
 // UpdateManifest describes an available update
 type UpdateManifest struct {
 	Version     string            `json:"version"`
-	ReleaseDate time.Time        `json:"release_date"`
+	ReleaseDate time.Time         `json:"release_date"`
 	Channel     string            `json:"channel"` // stable, beta, nightly
 	Platform    string            `json:"platform"`
 	Components  []UpdateComponent `json:"components"`
@@ -35,15 +35,15 @@ type UpdateManifest struct {
 
 // UpdateComponent is a single updatable component
 type UpdateComponent struct {
-	Name       string `json:"name"`       // agent, module, firmware, profile
-	Version    string `json:"version"`
-	URL        string `json:"url"`
-	SHA256     string `json:"sha256"`
-	SizeBytes  int64  `json:"size_bytes"`
-	DeltaFrom  string `json:"delta_from,omitempty"` // If delta update, from which version
-	DeltaURL   string `json:"delta_url,omitempty"`
-	DeltaSHA   string `json:"delta_sha256,omitempty"`
-	DeltaSize  int64  `json:"delta_size_bytes,omitempty"`
+	Name      string `json:"name"` // agent, module, firmware, profile
+	Version   string `json:"version"`
+	URL       string `json:"url"`
+	SHA256    string `json:"sha256"`
+	SizeBytes int64  `json:"size_bytes"`
+	DeltaFrom string `json:"delta_from,omitempty"` // If delta update, from which version
+	DeltaURL  string `json:"delta_url,omitempty"`
+	DeltaSHA  string `json:"delta_sha256,omitempty"`
+	DeltaSize int64  `json:"delta_size_bytes,omitempty"`
 }
 
 // OTAManager handles over-the-air updates
@@ -56,13 +56,13 @@ type OTAManager struct {
 }
 
 type UpdateState struct {
-	Status        string    `json:"status"` // idle, checking, downloading, applying, rebooting, rolled_back
-	Progress      int       `json:"progress_percent"`
-	LastCheck     time.Time `json:"last_check"`
-	LastUpdate    time.Time `json:"last_update"`
-	CurrentVersion string  `json:"current_version"`
-	TargetVersion  string  `json:"target_version,omitempty"`
-	Error          string  `json:"error,omitempty"`
+	Status         string    `json:"status"` // idle, checking, downloading, applying, rebooting, rolled_back
+	Progress       int       `json:"progress_percent"`
+	LastCheck      time.Time `json:"last_check"`
+	LastUpdate     time.Time `json:"last_update"`
+	CurrentVersion string    `json:"current_version"`
+	TargetVersion  string    `json:"target_version,omitempty"`
+	Error          string    `json:"error,omitempty"`
 }
 
 func NewOTAManager(agent *Agent) *OTAManager {
