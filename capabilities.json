@@ -16,7 +16,7 @@
   },
   "consumes": {
     "waveProducts": [
-      { "repo": "wave-av/wave-gateway", "endpoint": "/v1/edge/enroll" }
+      { "repo": "wave-av/api-gateway", "endpoint": "/v1/edge/enroll" }
     ],
     "foundationFrameworks": ["frameworks/protocol-plane", "frameworks/platform-registry"]
   },
