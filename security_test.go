@@ -25,7 +25,7 @@ func TestValidateNameRejectsInjection(t *testing.T) {
 		}
 	}
 
-	good := []string{"camera", "wave-surfer", "audio_v2", "mod.1"}
+	good := []string{"camera", "thermal-cam", "audio_v2", "mod.1"}
 	for _, name := range good {
 		if err := validateName("module", name); err != nil {
 			t.Errorf("validateName rejected legitimate name %q: %v", name, err)
