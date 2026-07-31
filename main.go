@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"syscall"
@@ -125,9 +126,44 @@ func (a *Agent) saveConfig() error {
 	return os.WriteFile(filepath.Join(ConfigDir, "device.json"), data, 0644)
 }
 
+// safeNamePattern is the allowlist for caller-supplied module and profile
+// names. Module/profile names arrive from untrusted sources (the cloud
+// WebSocket command channel and the local HTTP API), and are used to build
+// filesystem paths that get executed and systemd unit names. Anything outside
+// this character set — path separators, "..", whitespace, NUL, or shell
+// metacharacters — is rejected before the value can reach os/exec.
+var safeNamePattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$`)
+
+// validateName enforces safeNamePattern on an untrusted identifier.
+func validateName(kind, name string) error {
+	if !safeNamePattern.MatchString(name) || strings.Contains(name, "..") {
+		return fmt.Errorf("invalid %s name %q: must match %s", kind, name, safeNamePattern.String())
+	}
+	return nil
+}
+
+// resolveUnder joins name onto dir and guarantees the result stays inside dir.
+// Defence in depth behind validateName: even if the allowlist is ever widened,
+// a traversal cannot escape the intended directory.
+func resolveUnder(dir, name string) (string, error) {
+	root := filepath.Clean(dir)
+	p := filepath.Join(root, name)
+	if p != root && !strings.HasPrefix(p, root+string(os.PathSeparator)) {
+		return "", fmt.Errorf("resolved path %q escapes %q", p, root)
+	}
+	return p, nil
+}
+
 // LoadProfile loads a module profile and starts its modules
 func (a *Agent) LoadProfile(profileName string) error {
-	profilePath := filepath.Join(ProfileDir, profileName+".yaml")
+	if err := validateName("profile", profileName); err != nil {
+		return err
+	}
+
+	profilePath, err := resolveUnder(ProfileDir, profileName+".yaml")
+	if err != nil {
+		return err
+	}
 	if _, err := os.Stat(profilePath); err != nil {
 		return fmt.Errorf("profile not found: %s", profilePath)
 	}
@@ -167,15 +203,23 @@ func (a *Agent) LoadProfile(profileName string) error {
 
 // InstallModule installs and starts a module
 func (a *Agent) InstallModule(name string) error {
+	// Validate BEFORE the name is used to build any path or command argument.
+	if err := validateName("module", name); err != nil {
+		return err
+	}
+
+	modulePath, err := resolveUnder(ModuleDir, name)
+	if err != nil {
+		return err
+	}
+	installScript := filepath.Join(modulePath, "install.sh")
+
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
 	if _, exists := a.modules[name]; exists {
 		return fmt.Errorf("module %s already installed", name)
 	}
-
-	modulePath := filepath.Join(ModuleDir, name)
-	installScript := filepath.Join(modulePath, "install.sh")
 
 	state := &ModuleState{
 		Name:   name,
@@ -191,7 +235,9 @@ func (a *Agent) InstallModule(name string) error {
 	// Run install script if it exists
 	if _, err := os.Stat(installScript); err == nil {
 		log.Printf("Installing module: %s", name)
-		cmd := exec.CommandContext(a.ctx, "bash", installScript)
+		// Explicit argv — never a shell string. "--" stops bash from
+		// interpreting a script path as an option.
+		cmd := exec.CommandContext(a.ctx, "bash", "--", installScript)
 		cmd.Dir = modulePath
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
@@ -213,6 +259,10 @@ func (a *Agent) InstallModule(name string) error {
 
 // StopModule stops a running module
 func (a *Agent) StopModule(name string) error {
+	if err := validateName("module", name); err != nil {
+		return err
+	}
+
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -221,8 +271,8 @@ func (a *Agent) StopModule(name string) error {
 		return fmt.Errorf("module %s not found", name)
 	}
 
-	// Stop systemd service
-	cmd := exec.Command("systemctl", "stop", "wave-"+name)
+	// Stop systemd service — explicit argv, validated unit name.
+	cmd := exec.Command("systemctl", "stop", "--", "wave-"+name)
 	_ = cmd.Run() // Ignore error if service doesn't exist
 
 	state.Status = "stopped"
@@ -245,7 +295,9 @@ func (a *Agent) HealthCheck() map[string]ModuleHealth {
 		}
 
 		// Check systemd service status
-		cmd := exec.Command("systemctl", "is-active", "wave-"+name)
+		// name is allowlisted at install time (validateName), so it cannot
+		// carry separators or option-leading characters here.
+		cmd := exec.Command("systemctl", "is-active", "--", "wave-"+name)
 		if output, err := cmd.Output(); err != nil {
 			health.Status = "unhealthy"
 			health.Errors = append(health.Errors, "service not active")
