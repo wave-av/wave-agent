@@ -16,8 +16,9 @@ All notable changes to this project are documented here. The format is based on
   `https://releases.wave.online/edge` over HTTPS; redirects are re-validated
   against the same origin, so update URLs hosted elsewhere are now rejected.
 - OTA downloads are capped at 512 MiB (manifest documents at 1 MiB) and abort
-  when the transfer stalls for 2 minutes, replacing the previous whole-request
-  timeout so slow but progressing downloads can complete.
+  when the transfer stalls for 2 minutes or exceeds an absolute 1-hour ceiling,
+  replacing the previous whole-request timeout so slow but progressing
+  downloads can complete while a trickling server cannot park the update loop.
 - Component names and versions from manifests and cloud commands are validated
   against the existing identifier allowlist before being used as staging file
   names, so updates with traversal or otherwise unsafe identifiers are rejected.

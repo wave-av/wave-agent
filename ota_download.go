@@ -38,12 +38,21 @@ const (
 	updateConnectTimeout = 1 * time.Minute
 
 	// updateStallTimeout aborts a transfer that makes no progress for this
-	// long. The bound is on progress rather than the whole request on
-	// purpose: a wall-clock cap sized against maxUpdateBytes would demand
-	// ~7 Mbit/s sustained, so a device on a slow link could never finish and
-	// would retry from zero forever, while a server that stalls mid-stream
-	// still cannot park the update loop.
+	// long. The primary bound is on progress rather than the whole request
+	// on purpose: a tight wall-clock cap sized against maxUpdateBytes would
+	// demand ~7 Mbit/s sustained, so a device on a slow link could never
+	// finish and would retry from zero forever, while a server that stalls
+	// mid-stream still cannot park the update loop.
 	updateStallTimeout = 2 * time.Minute
+
+	// updateMaxTransferTime is the absolute ceiling on a single request. The
+	// stall guard catches a server that stops sending; this catches one that
+	// trickles a byte just inside every stall window, which would otherwise
+	// park a transfer, and the synchronous update-check loop waiting on it,
+	// essentially forever. One hour is ~1.2 Mbit/s sustained for a
+	// maximum-size artifact, well below the primary stall bound's implied
+	// floor, so it only ever fires on pathological transfers.
+	updateMaxTransferTime = 1 * time.Hour
 
 	maxUpdateRedirects = 5
 )
@@ -158,12 +167,14 @@ func updateStagingPath(name, version string) (string, error) {
 
 // getFromUpdateOrigin validates a URL and fetches it with the guarded client.
 // The caller closes the body. The returned body aborts the request if reads
-// stop making progress for updateStallTimeout.
+// stop making progress for updateStallTimeout, and the whole request is
+// additionally capped at updateMaxTransferTime so a trickling server cannot
+// stay just inside the stall window indefinitely.
 func getFromUpdateOrigin(rawURL string) (*http.Response, error) {
 	if err := validateUpdateURL(rawURL); err != nil {
 		return nil, err
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), updateMaxTransferTime)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		cancel()
