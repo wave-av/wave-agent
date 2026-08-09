@@ -5,3 +5,16 @@ All notable changes to this project are documented here. The format is based on
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+### Changed
+
+- OTA integrity checking now fails closed: an update whose manifest omits or
+  malforms the expected SHA-256 digest is refused instead of installed
+  unverified, and the `update_agent` cloud command now requires a `sha256`
+  parameter.
+- OTA downloads (manifests, components, agent binaries) are confined to
+  `https://releases.wave.online/edge` over HTTPS; redirects are re-validated
+  against the same origin, so update URLs hosted elsewhere are now rejected.
+- OTA downloads are capped at 512 MiB and abort when the transfer stalls for
+  2 minutes, replacing the previous whole-request timeout so slow but
+  progressing downloads can complete.

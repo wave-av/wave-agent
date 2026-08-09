@@ -3,12 +3,14 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -29,9 +31,17 @@ const (
 	// party as the URL, so the bound has to be a constant we control.
 	maxUpdateBytes = 512 << 20 // 512 MiB
 
-	// updateHTTPTimeout bounds a whole request including body transfer, so a
-	// server that stalls mid-stream cannot park the update loop forever.
-	updateHTTPTimeout = 10 * time.Minute
+	// updateConnectTimeout bounds connection setup: dialing, the TLS
+	// handshake, and the wait for response headers.
+	updateConnectTimeout = 1 * time.Minute
+
+	// updateStallTimeout aborts a transfer that makes no progress for this
+	// long. The bound is on progress rather than the whole request on
+	// purpose: a wall-clock cap sized against maxUpdateBytes would demand
+	// ~7 Mbit/s sustained, so a device on a slow link could never finish and
+	// would retry from zero forever, while a server that stalls mid-stream
+	// still cannot park the update loop.
+	updateStallTimeout = 2 * time.Minute
 
 	maxUpdateRedirects = 5
 )
@@ -307,8 +317,17 @@ func (ota *OTAManager) GetState() UpdateState {
 // updateHTTPClient is the only client the update path uses. Every redirect hop
 // is re-checked against validateUpdateURL: the origin check on the initial URL
 // is worth nothing if a 302 can walk the download somewhere else.
+//
+// There is deliberately no Client.Timeout: that would bound the whole exchange
+// including the body transfer. Connection setup is bounded here; the transfer
+// itself is bounded by progress via stallGuardBody in getFromUpdateOrigin.
 var updateHTTPClient = &http.Client{
-	Timeout: updateHTTPTimeout,
+	Transport: &http.Transport{
+		Proxy:                 http.ProxyFromEnvironment,
+		DialContext:           (&net.Dialer{Timeout: updateConnectTimeout}).DialContext,
+		TLSHandshakeTimeout:   updateConnectTimeout,
+		ResponseHeaderTimeout: updateConnectTimeout,
+	},
 	CheckRedirect: func(req *http.Request, via []*http.Request) error {
 		if len(via) >= maxUpdateRedirects {
 			return fmt.Errorf("stopped after %d redirects", maxUpdateRedirects)
@@ -320,18 +339,26 @@ var updateHTTPClient = &http.Client{
 	},
 }
 
-// normalizeUpdateHost lower-cases a host and strips the pieces that make two
-// spellings of the same name compare unequal: the root label's trailing dot and
-// an explicitly-written default port.
-func normalizeUpdateHost(host string) string {
-	h := strings.ToLower(host)
-	h = strings.TrimSuffix(h, ":443")
-	if i := strings.Index(h, ":"); i >= 0 {
-		// A non-default port is part of the identity — keep it, but still trim
-		// a trailing dot from the name portion.
-		return strings.TrimSuffix(h[:i], ".") + h[i:]
+// sameUpdateHost compares two authorities component-wise via url.Hostname and
+// url.Port rather than as raw strings, so bracketed IPv6 literals and other
+// unusual spellings are handled by the parser instead of ad hoc trimming. Only
+// the root label's trailing dot still needs normalizing, and the port defaults
+// to 443 because the scheme is already pinned to https.
+func sameUpdateHost(u, base *url.URL) bool {
+	uName := strings.TrimSuffix(strings.ToLower(u.Hostname()), ".")
+	baseName := strings.TrimSuffix(strings.ToLower(base.Hostname()), ".")
+	if uName == "" || uName != baseName {
+		return false
 	}
-	return strings.TrimSuffix(h, ".")
+	uPort := u.Port()
+	if uPort == "" {
+		uPort = "443"
+	}
+	basePort := base.Port()
+	if basePort == "" {
+		basePort = "443"
+	}
+	return uPort == basePort
 }
 
 // validateUpdateURL confines a download to the release origin over TLS.
@@ -365,7 +392,7 @@ func validateUpdateURL(raw string) error {
 	if u.User != nil {
 		return fmt.Errorf("update URL must not carry credentials")
 	}
-	if normalizeUpdateHost(u.Host) != normalizeUpdateHost(base.Host) {
+	if !sameUpdateHost(u, base) {
 		return fmt.Errorf("update URL host %q is not the release origin", u.Host)
 	}
 
@@ -381,12 +408,50 @@ func validateUpdateURL(raw string) error {
 }
 
 // getFromUpdateOrigin validates a URL and fetches it with the guarded client.
-// The caller closes the body.
+// The caller closes the body. The returned body aborts the request if reads
+// stop making progress for updateStallTimeout.
 func getFromUpdateOrigin(rawURL string) (*http.Response, error) {
 	if err := validateUpdateURL(rawURL); err != nil {
 		return nil, err
 	}
-	return updateHTTPClient.Get(rawURL)
+	ctx, cancel := context.WithCancel(context.Background())
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	resp, err := updateHTTPClient.Do(req)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	guard := &stallGuardBody{body: resp.Body, cancel: cancel}
+	guard.timer = time.AfterFunc(updateStallTimeout, cancel)
+	resp.Body = guard
+	return resp, nil
+}
+
+// stallGuardBody cancels its request when reads make no progress for
+// updateStallTimeout. Each successful read pushes the deadline out, so a slow
+// but progressing transfer runs to completion while a stalled one is cut off.
+type stallGuardBody struct {
+	body   io.ReadCloser
+	timer  *time.Timer
+	cancel context.CancelFunc
+}
+
+func (b *stallGuardBody) Read(p []byte) (int, error) {
+	n, err := b.body.Read(p)
+	if n > 0 {
+		b.timer.Reset(updateStallTimeout)
+	}
+	return n, err
+}
+
+func (b *stallGuardBody) Close() error {
+	b.timer.Stop()
+	b.cancel()
+	return b.body.Close()
 }
 
 func downloadFile(rawURL string, dest string) error {
