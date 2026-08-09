@@ -3,13 +3,12 @@
 package main
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -80,9 +79,20 @@ func NewOTAManager(agent *Agent) *OTAManager {
 
 // Start begins periodic update checks
 func (ota *OTAManager) Start() {
-	if err := os.MkdirAll(UpdateDir, 0755); err != nil {
+	// Staged artifacts are root-only working files; nothing else needs to
+	// read them, and a tighter directory keeps other local users away from
+	// the paths this process later installs from.
+	if err := os.MkdirAll(UpdateDir, 0700); err != nil {
 		log.Printf("OTA: failed to create update dir: %v", err)
 		return
+	}
+	// MkdirAll applies the mode only on creation. Devices upgrading from an
+	// older agent already have this directory as 0755, so tighten it
+	// explicitly rather than only for fresh installs. The chmod is defence in
+	// depth, not a precondition: failing it must not take down update
+	// checking and rollback detection, so log and continue.
+	if err := os.Chmod(UpdateDir, 0700); err != nil {
+		log.Printf("OTA: failed to tighten update dir permissions: %v", err)
 	}
 
 	// Check for pending rollback
@@ -113,10 +123,13 @@ func (ota *OTAManager) CheckForUpdates() (*UpdateManifest, error) {
 	ota.currentState.Status = "checking"
 	ota.currentState.LastCheck = time.Now()
 
-	url := fmt.Sprintf("%s/manifest.json?platform=%s&channel=%s&current=%s",
-		UpdateBaseURL, ota.agent.config.Platform, ota.channel, Version)
+	q := url.Values{}
+	q.Set("platform", ota.agent.config.Platform)
+	q.Set("channel", ota.channel)
+	q.Set("current", Version)
+	manifestURL := fmt.Sprintf("%s/manifest.json?%s", UpdateBaseURL, q.Encode())
 
-	resp, err := http.Get(url)
+	resp, err := getFromUpdateOrigin(manifestURL)
 	if err != nil {
 		ota.currentState.Status = "idle"
 		ota.currentState.Error = err.Error()
@@ -135,8 +148,13 @@ func (ota *OTAManager) CheckForUpdates() (*UpdateManifest, error) {
 		return nil, fmt.Errorf("update server returned %d", resp.StatusCode)
 	}
 
+	// The decode is bounded like every other read on this path: the manifest
+	// is buffered in memory while parsing, so an origin that streams an
+	// endless body (slowly enough to keep resetting the stall guard) must not
+	// be able to grow the agent until the OOM killer takes the device out. A
+	// truncated oversized manifest surfaces as a parse error below.
 	var manifest UpdateManifest
-	if err := json.NewDecoder(resp.Body).Decode(&manifest); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxManifestBytes)).Decode(&manifest); err != nil {
 		ota.currentState.Status = "idle"
 		return nil, fmt.Errorf("parse manifest: %w", err)
 	}
@@ -158,18 +176,26 @@ func (ota *OTAManager) ApplyUpdate(manifest *UpdateManifest) error {
 	ota.currentState.TargetVersion = manifest.Version
 
 	for i, component := range manifest.Components {
-		// Prefer delta update if available
+		// An advertised delta is deliberately NOT selected. Nothing in the
+		// apply path can reconstruct a full artifact from a patch blob:
+		// applyComponent would install the delta as if it were the whole
+		// component (tar-extract it, or copy it over the agent binary). Until
+		// a patch applier exists, the full artifact is always downloaded and
+		// the delta_* manifest fields only produce a log line.
 		downloadURL := component.URL
 		expectedSHA := component.SHA256
 		if component.DeltaFrom == Version && component.DeltaURL != "" {
-			downloadURL = component.DeltaURL
-			expectedSHA = component.DeltaSHA
-			log.Printf("OTA: using delta update for %s (%d bytes vs %d bytes full)",
+			log.Printf("OTA: manifest advertises a delta for %s (%d bytes vs %d bytes full); delta application is not implemented, downloading the full artifact",
 				component.Name, component.DeltaSize, component.SizeBytes)
 		}
 
 		// Download
-		localPath := filepath.Join(UpdateDir, fmt.Sprintf("%s-%s", component.Name, component.Version))
+		localPath, err := updateStagingPath(component.Name, component.Version)
+		if err != nil {
+			ota.currentState.Status = "idle"
+			ota.currentState.Error = fmt.Sprintf("component %s: %v", component.Name, err)
+			return err
+		}
 		if err := downloadFile(downloadURL, localPath); err != nil {
 			ota.currentState.Status = "idle"
 			ota.currentState.Error = fmt.Sprintf("download %s: %v", component.Name, err)
@@ -193,7 +219,14 @@ func (ota *OTAManager) ApplyUpdate(manifest *UpdateManifest) error {
 	// Apply components
 	ota.currentState.Status = "applying"
 	for i, component := range manifest.Components {
-		localPath := filepath.Join(UpdateDir, fmt.Sprintf("%s-%s", component.Name, component.Version))
+		// Already validated in the download loop; recomputed via the same
+		// helper so the two paths cannot drift apart.
+		localPath, err := updateStagingPath(component.Name, component.Version)
+		if err != nil {
+			log.Printf("OTA: invalid component identity %s, rolling back: %v", component.Name, err)
+			ota.rollback()
+			return err
+		}
 		if err := ota.applyComponent(component, localPath); err != nil {
 			log.Printf("OTA: failed to apply %s, rolling back: %v", component.Name, err)
 			ota.rollback()
@@ -285,52 +318,6 @@ func (ota *OTAManager) GetState() UpdateState {
 	return ota.currentState
 }
 
-// --- Helpers ---
-
-func downloadFile(url string, dest string) error {
-	resp, err := http.Get(url)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("download returned %d", resp.StatusCode)
-	}
-
-	f, err := os.Create(dest)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	_, err = io.Copy(f, resp.Body)
-	return err
-}
-
-func verifySHA256(path string, expected string) error {
-	if expected == "" {
-		return nil // Skip verification if no hash provided
-	}
-
-	f, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return err
-	}
-
-	actual := hex.EncodeToString(h.Sum(nil))
-	if actual != expected {
-		return fmt.Errorf("sha256 mismatch: expected %s, got %s", expected, actual)
-	}
-	return nil
-}
-
 func replaceAgentBinary(newBinary string) error {
 	targetPath := "/usr/local/bin/wave-agent"
 	backupPath := targetPath + ".bak"
@@ -387,15 +374,35 @@ func copyFile(src, dst string) error {
 	return err
 }
 
-// updateAgent downloads and installs a new agent version (called from cloud command)
-func updateAgent(version string, url string) error {
-	if url == "" {
-		url = fmt.Sprintf("%s/agent/wave-agent-%s-linux-arm64", UpdateBaseURL, version)
+// updateAgent downloads and installs a new agent version (called from cloud command).
+//
+// sha256Hex is required. This path replaces /usr/local/bin/wave-agent and
+// restarts into it, so it is the shortest route from a cloud message to code
+// running as root, and it previously performed no integrity check at all. An
+// update_agent command that carries no digest is now refused: the device keeps
+// running the version it has, which is the safe outcome of the two.
+func updateAgent(version string, rawURL string, sha256Hex string) error {
+	// The version is cloud-supplied and lands both in the default download URL
+	// and in the staging file name, so it goes through the same allowlist as
+	// every other untrusted identifier.
+	if err := validateName("version", version); err != nil {
+		return err
+	}
+	if rawURL == "" {
+		rawURL = fmt.Sprintf("%s/agent/wave-agent-%s-linux-arm64", UpdateBaseURL, version)
 	}
 
-	localPath := filepath.Join(UpdateDir, "wave-agent-"+version)
-	if err := downloadFile(url, localPath); err != nil {
+	localPath, err := resolveUnder(UpdateDir, "wave-agent-"+version)
+	if err != nil {
 		return err
+	}
+	if err := downloadFile(rawURL, localPath); err != nil {
+		return err
+	}
+
+	if err := verifySHA256(localPath, sha256Hex); err != nil {
+		os.Remove(localPath)
+		return fmt.Errorf("verify agent %s: %w", version, err)
 	}
 
 	if err := replaceAgentBinary(localPath); err != nil {
