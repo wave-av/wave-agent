@@ -88,10 +88,11 @@ func (ota *OTAManager) Start() {
 	}
 	// MkdirAll applies the mode only on creation. Devices upgrading from an
 	// older agent already have this directory as 0755, so tighten it
-	// explicitly rather than only for fresh installs.
+	// explicitly rather than only for fresh installs. The chmod is defence in
+	// depth, not a precondition: failing it must not take down update
+	// checking and rollback detection, so log and continue.
 	if err := os.Chmod(UpdateDir, 0700); err != nil {
 		log.Printf("OTA: failed to tighten update dir permissions: %v", err)
-		return
 	}
 
 	// Check for pending rollback
