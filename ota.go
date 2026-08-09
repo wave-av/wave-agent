@@ -86,6 +86,13 @@ func (ota *OTAManager) Start() {
 		log.Printf("OTA: failed to create update dir: %v", err)
 		return
 	}
+	// MkdirAll applies the mode only on creation. Devices upgrading from an
+	// older agent already have this directory as 0755, so tighten it
+	// explicitly rather than only for fresh installs.
+	if err := os.Chmod(UpdateDir, 0700); err != nil {
+		log.Printf("OTA: failed to tighten update dir permissions: %v", err)
+		return
+	}
 
 	// Check for pending rollback
 	ota.checkRollback()
@@ -140,8 +147,13 @@ func (ota *OTAManager) CheckForUpdates() (*UpdateManifest, error) {
 		return nil, fmt.Errorf("update server returned %d", resp.StatusCode)
 	}
 
+	// The decode is bounded like every other read on this path: the manifest
+	// is buffered in memory while parsing, so an origin that streams an
+	// endless body (slowly enough to keep resetting the stall guard) must not
+	// be able to grow the agent until the OOM killer takes the device out. A
+	// truncated oversized manifest surfaces as a parse error below.
 	var manifest UpdateManifest
-	if err := json.NewDecoder(resp.Body).Decode(&manifest); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxManifestBytes)).Decode(&manifest); err != nil {
 		ota.currentState.Status = "idle"
 		return nil, fmt.Errorf("parse manifest: %w", err)
 	}

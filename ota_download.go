@@ -27,6 +27,12 @@ const (
 	// party as the URL, so the bound has to be a constant we control.
 	maxUpdateBytes = 512 << 20 // 512 MiB
 
+	// maxManifestBytes caps the manifest document itself. Unlike artifacts,
+	// the manifest is buffered in memory while it is decoded, so an unbounded
+	// body is an OOM lever rather than a disk-space one. A real manifest is a
+	// few KiB; 1 MiB is generous.
+	maxManifestBytes = 1 << 20 // 1 MiB
+
 	// updateConnectTimeout bounds connection setup: dialing, the TLS
 	// handshake, and the wait for response headers.
 	updateConnectTimeout = 1 * time.Minute
