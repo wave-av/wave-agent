@@ -79,7 +79,10 @@ func NewOTAManager(agent *Agent) *OTAManager {
 
 // Start begins periodic update checks
 func (ota *OTAManager) Start() {
-	if err := os.MkdirAll(UpdateDir, 0755); err != nil {
+	// Staged artifacts are root-only working files; nothing else needs to
+	// read them, and a tighter directory keeps other local users away from
+	// the paths this process later installs from.
+	if err := os.MkdirAll(UpdateDir, 0700); err != nil {
 		log.Printf("OTA: failed to create update dir: %v", err)
 		return
 	}
@@ -160,13 +163,16 @@ func (ota *OTAManager) ApplyUpdate(manifest *UpdateManifest) error {
 	ota.currentState.TargetVersion = manifest.Version
 
 	for i, component := range manifest.Components {
-		// Prefer delta update if available
+		// An advertised delta is deliberately NOT selected. Nothing in the
+		// apply path can reconstruct a full artifact from a patch blob:
+		// applyComponent would install the delta as if it were the whole
+		// component (tar-extract it, or copy it over the agent binary). Until
+		// a patch applier exists, the full artifact is always downloaded and
+		// the delta_* manifest fields only produce a log line.
 		downloadURL := component.URL
 		expectedSHA := component.SHA256
 		if component.DeltaFrom == Version && component.DeltaURL != "" {
-			downloadURL = component.DeltaURL
-			expectedSHA = component.DeltaSHA
-			log.Printf("OTA: using delta update for %s (%d bytes vs %d bytes full)",
+			log.Printf("OTA: manifest advertises a delta for %s (%d bytes vs %d bytes full); delta application is not implemented, downloading the full artifact",
 				component.Name, component.DeltaSize, component.SizeBytes)
 		}
 

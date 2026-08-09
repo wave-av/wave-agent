@@ -208,7 +208,14 @@ func downloadFile(rawURL string, dest string) error {
 		return fmt.Errorf("download returned %d", resp.StatusCode)
 	}
 
-	f, err := os.OpenFile(dest, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
+	// Never follow an existing symlink at dest: remove whatever sits there
+	// and insist on creating a fresh regular file. With O_EXCL the open fails
+	// on anything planted at the path between the remove and the open, so
+	// this root-owned write cannot be redirected to wherever a link points.
+	if err := os.Remove(dest); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	f, err := os.OpenFile(dest, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
 	if err != nil {
 		return err
 	}

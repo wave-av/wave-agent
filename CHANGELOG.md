@@ -21,3 +21,8 @@ All notable changes to this project are documented here. The format is based on
 - Component names and versions from manifests and cloud commands are validated
   against the existing identifier allowlist before being used as staging file
   names, so updates with traversal or otherwise unsafe identifiers are rejected.
+- Delta updates advertised in a manifest are no longer selected: no patch
+  applier exists, so the patch blob would have been installed as if it were the
+  full component. The full artifact is always downloaded instead.
+- The update staging directory is created root-only (0700) and staged files are
+  always created fresh, never written through an existing symlink.
