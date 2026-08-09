@@ -1,0 +1,26 @@
+main.go
+  s_929e9fe5158caa::t_6c4dd709c7a007 298-300
+  s_929e9fe5158caa::t_875e3c149e2ec0 17
+  s_929e9fe5158caa::t_5360d7776b69b9 262-265,274-275
+  s_929e9fe5158caa::t_baca34162bbc6f 129-156,159-166
+  s_929e9fe5158caa::t_fb9331b18d9084 206-216
+  s_929e9fe5158caa::t_a72233848c70ec 238-240
+security_test.go
+  s_929e9fe5158caa::t_ba9ff73bd3bf1b 1-48
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.18",
+  "base_commit_sha": "4547e81612b01bf986c142b8697b28dcaaec8f49",
+  "prompts": {},
+  "sessions": {
+    "s_929e9fe5158caa": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "73b452a5-ca70-42a8-b64a-65f88e638399",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": "Jake Fineman <jakefineman@gmail.com>"
+    }
+  }
+}
