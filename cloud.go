@@ -210,7 +210,8 @@ func (cc *CloudConnector) executeCommand(cmd CloudCommand) CommandResult {
 	case "update_agent":
 		version, _ := cmd.Params["version"].(string)
 		url, _ := cmd.Params["url"].(string)
-		if err := updateAgent(version, url); err != nil {
+		sha256Hex, _ := cmd.Params["sha256"].(string)
+		if err := updateAgent(version, url, sha256Hex); err != nil {
 			result.Status = "error"
 			result.Error = err.Error()
 		} else {

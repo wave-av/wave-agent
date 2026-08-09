@@ -10,9 +10,12 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -20,6 +23,17 @@ const (
 	UpdateDir     = "/var/lib/wave/updates"
 	UpdateBaseURL = "https://releases.wave.online/edge"
 	RollbackFile  = "/var/lib/wave/rollback-version"
+
+	// maxUpdateBytes caps any single download. The agent runs on devices with
+	// small disks, and the size field in a manifest is supplied by the same
+	// party as the URL, so the bound has to be a constant we control.
+	maxUpdateBytes = 512 << 20 // 512 MiB
+
+	// updateHTTPTimeout bounds a whole request including body transfer, so a
+	// server that stalls mid-stream cannot park the update loop forever.
+	updateHTTPTimeout = 10 * time.Minute
+
+	maxUpdateRedirects = 5
 )
 
 // UpdateManifest describes an available update
@@ -113,10 +127,13 @@ func (ota *OTAManager) CheckForUpdates() (*UpdateManifest, error) {
 	ota.currentState.Status = "checking"
 	ota.currentState.LastCheck = time.Now()
 
-	url := fmt.Sprintf("%s/manifest.json?platform=%s&channel=%s&current=%s",
-		UpdateBaseURL, ota.agent.config.Platform, ota.channel, Version)
+	q := url.Values{}
+	q.Set("platform", ota.agent.config.Platform)
+	q.Set("channel", ota.channel)
+	q.Set("current", Version)
+	manifestURL := fmt.Sprintf("%s/manifest.json?%s", UpdateBaseURL, q.Encode())
 
-	resp, err := http.Get(url)
+	resp, err := getFromUpdateOrigin(manifestURL)
 	if err != nil {
 		ota.currentState.Status = "idle"
 		ota.currentState.Error = err.Error()
@@ -287,8 +304,93 @@ func (ota *OTAManager) GetState() UpdateState {
 
 // --- Helpers ---
 
-func downloadFile(url string, dest string) error {
-	resp, err := http.Get(url)
+// updateHTTPClient is the only client the update path uses. Every redirect hop
+// is re-checked against validateUpdateURL: the origin check on the initial URL
+// is worth nothing if a 302 can walk the download somewhere else.
+var updateHTTPClient = &http.Client{
+	Timeout: updateHTTPTimeout,
+	CheckRedirect: func(req *http.Request, via []*http.Request) error {
+		if len(via) >= maxUpdateRedirects {
+			return fmt.Errorf("stopped after %d redirects", maxUpdateRedirects)
+		}
+		if err := validateUpdateURL(req.URL.String()); err != nil {
+			return fmt.Errorf("redirect target rejected: %w", err)
+		}
+		return nil
+	},
+}
+
+// normalizeUpdateHost lower-cases a host and strips the pieces that make two
+// spellings of the same name compare unequal: the root label's trailing dot and
+// an explicitly-written default port.
+func normalizeUpdateHost(host string) string {
+	h := strings.ToLower(host)
+	h = strings.TrimSuffix(h, ":443")
+	if i := strings.Index(h, ":"); i >= 0 {
+		// A non-default port is part of the identity — keep it, but still trim
+		// a trailing dot from the name portion.
+		return strings.TrimSuffix(h[:i], ".") + h[i:]
+	}
+	return strings.TrimSuffix(h, ".")
+}
+
+// validateUpdateURL confines a download to the release origin over TLS.
+//
+// The URLs on this path arrive inside the update manifest and inside cloud
+// commands, i.e. from the network, and what they select is a file this process
+// installs and then executes as root. Matching is exact rather than
+// prefix-based on purpose: "releases.wave.online.example.com" and
+// "notreleases.wave.online" both share a substring with the real host and
+// neither is it.
+func validateUpdateURL(raw string) error {
+	if raw == "" {
+		return fmt.Errorf("empty update URL")
+	}
+
+	base, err := url.Parse(UpdateBaseURL)
+	if err != nil {
+		return fmt.Errorf("invalid UpdateBaseURL %q: %w", UpdateBaseURL, err)
+	}
+
+	u, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("invalid update URL: %w", err)
+	}
+	if u.Opaque != "" {
+		return fmt.Errorf("update URL must not be opaque")
+	}
+	if !strings.EqualFold(u.Scheme, "https") {
+		return fmt.Errorf("update URL must use https, got %q", u.Scheme)
+	}
+	if u.User != nil {
+		return fmt.Errorf("update URL must not carry credentials")
+	}
+	if normalizeUpdateHost(u.Host) != normalizeUpdateHost(base.Host) {
+		return fmt.Errorf("update URL host %q is not the release origin", u.Host)
+	}
+
+	// u.Path is already percent-decoded, so cleaning it here also collapses
+	// encoded traversal such as %2e%2e%2f.
+	basePath := path.Clean("/" + strings.Trim(base.Path, "/"))
+	got := path.Clean("/" + strings.TrimPrefix(u.Path, "/"))
+	if got != basePath && !strings.HasPrefix(got, basePath+"/") {
+		return fmt.Errorf("update URL path %q is outside %q", u.Path, basePath)
+	}
+
+	return nil
+}
+
+// getFromUpdateOrigin validates a URL and fetches it with the guarded client.
+// The caller closes the body.
+func getFromUpdateOrigin(rawURL string) (*http.Response, error) {
+	if err := validateUpdateURL(rawURL); err != nil {
+		return nil, err
+	}
+	return updateHTTPClient.Get(rawURL)
+}
+
+func downloadFile(rawURL string, dest string) error {
+	resp, err := getFromUpdateOrigin(rawURL)
 	if err != nil {
 		return err
 	}
@@ -298,22 +400,54 @@ func downloadFile(url string, dest string) error {
 		return fmt.Errorf("download returned %d", resp.StatusCode)
 	}
 
-	f, err := os.Create(dest)
+	f, err := os.OpenFile(dest, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
 
-	_, err = io.Copy(f, resp.Body)
-	return err
-}
+	// LimitReader is given one byte of headroom so that hitting the cap is
+	// distinguishable from a download that is exactly maxUpdateBytes long.
+	n, copyErr := io.Copy(f, io.LimitReader(resp.Body, maxUpdateBytes+1))
+	closeErr := f.Close()
 
-func verifySHA256(path string, expected string) error {
-	if expected == "" {
-		return nil // Skip verification if no hash provided
+	if copyErr == nil && closeErr == nil && n <= maxUpdateBytes {
+		return nil
 	}
 
-	f, err := os.Open(path)
+	os.Remove(dest)
+	switch {
+	case copyErr != nil:
+		return copyErr
+	case closeErr != nil:
+		return closeErr
+	default:
+		return fmt.Errorf("update exceeds the %d byte limit", int64(maxUpdateBytes))
+	}
+}
+
+// verifySHA256 checks a downloaded file against an expected digest.
+//
+// It fails closed. An absent or malformed digest is an error, never a skip: the
+// digest travels in the same manifest as the URL, so treating "" as "no check
+// required" hands whoever writes that manifest an integrity opt-out.
+//
+// Note the limit of what this proves. A digest that ships alongside the artifact
+// establishes that the bytes were not altered in transit; it does not establish
+// who authored them. Signing the manifest is tracked separately.
+func verifySHA256(filePath string, expected string) error {
+	if expected == "" {
+		return fmt.Errorf("refusing to install without an expected sha256")
+	}
+	if len(expected) != hex.EncodedLen(sha256.Size) {
+		return fmt.Errorf("expected sha256 must be %d hex characters, got %d",
+			hex.EncodedLen(sha256.Size), len(expected))
+	}
+	expectedLower := strings.ToLower(expected)
+	if _, err := hex.DecodeString(expectedLower); err != nil {
+		return fmt.Errorf("expected sha256 is not valid hex: %w", err)
+	}
+
+	f, err := os.Open(filePath)
 	if err != nil {
 		return err
 	}
@@ -325,8 +459,8 @@ func verifySHA256(path string, expected string) error {
 	}
 
 	actual := hex.EncodeToString(h.Sum(nil))
-	if actual != expected {
-		return fmt.Errorf("sha256 mismatch: expected %s, got %s", expected, actual)
+	if actual != expectedLower {
+		return fmt.Errorf("sha256 mismatch: expected %s, got %s", expectedLower, actual)
 	}
 	return nil
 }
@@ -387,15 +521,26 @@ func copyFile(src, dst string) error {
 	return err
 }
 
-// updateAgent downloads and installs a new agent version (called from cloud command)
-func updateAgent(version string, url string) error {
-	if url == "" {
-		url = fmt.Sprintf("%s/agent/wave-agent-%s-linux-arm64", UpdateBaseURL, version)
+// updateAgent downloads and installs a new agent version (called from cloud command).
+//
+// sha256Hex is required. This path replaces /usr/local/bin/wave-agent and
+// restarts into it, so it is the shortest route from a cloud message to code
+// running as root, and it previously performed no integrity check at all. An
+// update_agent command that carries no digest is now refused: the device keeps
+// running the version it has, which is the safe outcome of the two.
+func updateAgent(version string, rawURL string, sha256Hex string) error {
+	if rawURL == "" {
+		rawURL = fmt.Sprintf("%s/agent/wave-agent-%s-linux-arm64", UpdateBaseURL, version)
 	}
 
 	localPath := filepath.Join(UpdateDir, "wave-agent-"+version)
-	if err := downloadFile(url, localPath); err != nil {
+	if err := downloadFile(rawURL, localPath); err != nil {
 		return err
+	}
+
+	if err := verifySHA256(localPath, sha256Hex); err != nil {
+		os.Remove(localPath)
+		return fmt.Errorf("verify agent %s: %w", version, err)
 	}
 
 	if err := replaceAgentBinary(localPath); err != nil {
