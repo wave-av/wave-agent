@@ -138,6 +138,33 @@ func TestValidateUpdateURLConfinesToReleaseOrigin(t *testing.T) {
 	}
 }
 
+// TestUpdateStagingPathRejectsTraversal pins that manifest- and cloud-supplied
+// component identity goes through the same allowlist as module and profile
+// names before it becomes a filename written as root under UpdateDir.
+func TestUpdateStagingPathRejectsTraversal(t *testing.T) {
+	bad := [][2]string{
+		{"../../usr/local/bin/wave-agent", "1.0.0"},
+		{"agent", "../../etc/cron.d/evil"},
+		{"agent/sub", "1.0.0"},
+		{"", "1.0.0"},
+		{"agent", ""},
+		{"agent", "1.0.0;rm -rf /"},
+	}
+	for _, nv := range bad {
+		if _, err := updateStagingPath(nv[0], nv[1]); err == nil {
+			t.Errorf("updateStagingPath accepted name %q version %q", nv[0], nv[1])
+		}
+	}
+
+	got, err := updateStagingPath("agent", "1.2.3")
+	if err != nil {
+		t.Fatalf("updateStagingPath rejected a legitimate component: %v", err)
+	}
+	if want := UpdateDir + "/agent-1.2.3"; got != want {
+		t.Errorf("updateStagingPath = %q, want %q", got, want)
+	}
+}
+
 // TestUpdateClientRevalidatesRedirects is the reason the origin check is not
 // decorative: without it a 302 from the real origin walks the download anywhere.
 func TestUpdateClientRevalidatesRedirects(t *testing.T) {

@@ -196,7 +196,12 @@ func (ota *OTAManager) ApplyUpdate(manifest *UpdateManifest) error {
 		}
 
 		// Download
-		localPath := filepath.Join(UpdateDir, fmt.Sprintf("%s-%s", component.Name, component.Version))
+		localPath, err := updateStagingPath(component.Name, component.Version)
+		if err != nil {
+			ota.currentState.Status = "idle"
+			ota.currentState.Error = fmt.Sprintf("component %s: %v", component.Name, err)
+			return err
+		}
 		if err := downloadFile(downloadURL, localPath); err != nil {
 			ota.currentState.Status = "idle"
 			ota.currentState.Error = fmt.Sprintf("download %s: %v", component.Name, err)
@@ -220,7 +225,14 @@ func (ota *OTAManager) ApplyUpdate(manifest *UpdateManifest) error {
 	// Apply components
 	ota.currentState.Status = "applying"
 	for i, component := range manifest.Components {
-		localPath := filepath.Join(UpdateDir, fmt.Sprintf("%s-%s", component.Name, component.Version))
+		// Already validated in the download loop; recomputed via the same
+		// helper so the two paths cannot drift apart.
+		localPath, err := updateStagingPath(component.Name, component.Version)
+		if err != nil {
+			log.Printf("OTA: invalid component identity %s, rolling back: %v", component.Name, err)
+			ota.rollback()
+			return err
+		}
 		if err := ota.applyComponent(component, localPath); err != nil {
 			log.Printf("OTA: failed to apply %s, rolling back: %v", component.Name, err)
 			ota.rollback()
@@ -405,6 +417,21 @@ func validateUpdateURL(raw string) error {
 	}
 
 	return nil
+}
+
+// updateStagingPath resolves the staging file for a component inside
+// UpdateDir. Name and version arrive in the manifest or a cloud command, i.e.
+// from the network, and become part of a path this process writes as root, so
+// they go through the same validateName/resolveUnder pair as module and
+// profile names before they can touch the filesystem.
+func updateStagingPath(name, version string) (string, error) {
+	if err := validateName("component", name); err != nil {
+		return "", err
+	}
+	if err := validateName("version", version); err != nil {
+		return "", err
+	}
+	return resolveUnder(UpdateDir, name+"-"+version)
 }
 
 // getFromUpdateOrigin validates a URL and fetches it with the guarded client.
@@ -594,11 +621,20 @@ func copyFile(src, dst string) error {
 // update_agent command that carries no digest is now refused: the device keeps
 // running the version it has, which is the safe outcome of the two.
 func updateAgent(version string, rawURL string, sha256Hex string) error {
+	// The version is cloud-supplied and lands both in the default download URL
+	// and in the staging file name, so it goes through the same allowlist as
+	// every other untrusted identifier.
+	if err := validateName("version", version); err != nil {
+		return err
+	}
 	if rawURL == "" {
 		rawURL = fmt.Sprintf("%s/agent/wave-agent-%s-linux-arm64", UpdateBaseURL, version)
 	}
 
-	localPath := filepath.Join(UpdateDir, "wave-agent-"+version)
+	localPath, err := resolveUnder(UpdateDir, "wave-agent-"+version)
+	if err != nil {
+		return err
+	}
 	if err := downloadFile(rawURL, localPath); err != nil {
 		return err
 	}
