@@ -2,3 +2,5 @@ zig-out/
 zig-cache/
 *.wasm
 wave-agent
+.DS_Store
+**/.DS_Store
