@@ -1,0 +1,26 @@
+{
+  "mcpServers": {
+    "github": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_TOKEN": "${env:GITHUB_TOKEN}"
+      }
+    },
+    "playwright": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@playwright/mcp@latest"]
+    },
+    "exampleRemoteOAuth": {
+      "type": "http",
+      "url": "https://example.com/mcp",
+      "auth": {
+        "CLIENT_ID": "${env:EXAMPLE_MCP_CLIENT_ID}",
+        "CLIENT_SECRET": "${env:EXAMPLE_MCP_CLIENT_SECRET}",
+        "scopes": ["read"]
+      }
+    }
+  }
+}
