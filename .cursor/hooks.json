@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "hooks": {
+    "beforeShellExecution": [
+      {
+        "type": "command",
+        "command": "node .cursor/hooks/guard-shell.mjs",
+        "timeout": 10000,
+        "failClosed": true
+      }
+    ],
+    "beforeMCPExecution": [
+      {
+        "type": "command",
+        "command": "node .cursor/hooks/audit-mcp.mjs",
+        "timeout": 10000,
+        "failClosed": true
+      }
+    ],
+    "afterFileEdit": [
+      {
+        "type": "command",
+        "command": "node .cursor/hooks/format-after-edit.mjs",
+        "timeout": 120000,
+        "failClosed": false
+      }
+    ],
+    "stop": [
+      {
+        "type": "command",
+        "command": "node .cursor/hooks/lane-receipt.mjs",
+        "timeout": 10000,
+        "failClosed": false
+      }
+    ]
+  }
+}

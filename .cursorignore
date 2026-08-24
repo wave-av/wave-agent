@@ -1,0 +1,15 @@
+.git/
+node_modules/
+dist/
+build/
+.next/
+.turbo/
+coverage/
+*.log
+.env
+.env.*
+**/.env
+**/.env.*
+.cursor-agent/
+.doppler/
+secrets/

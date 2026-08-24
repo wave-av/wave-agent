@@ -1,0 +1,34 @@
+---
+description: WAVE fleet operating rules for Cursor Agent, Cursor CLI, and Cursor cloud workers: receipts, least privilege, cost-aware context, safe MCP/sandbox usage.
+alwaysApply: true
+---
+
+# WAVE Fleet Operating Rules
+
+## Receipts and truth
+- Every claim about code, config, health, cost, or security must carry a receipt: file:line, command output, URL, or a named unknown.
+- Never say "blocked on a credential" until prior memory and the full public registry/changelog have been checked.
+- Keep changes minimal and on-task. Do not refactor adjacent logic unless required for the requested outcome.
+
+## Secrets and MCP
+- Never print secrets, tokens, cookies, private keys, or bearer values. Redact them in logs and summaries.
+- Never inline credentials in `.cursor/mcp.json`, hooks, scripts, rules, or prompts. Use `${env:NAME}` interpolation or the Cursor Secrets tab.
+- Prefer remote MCP servers over Streamable HTTP with OAuth. Avoid `mcp-remote` stdio bridges unless there is no native transport.
+- Do not run with `--approve-mcps`, Auto-Run, `--force`, or `--yolo` unless the user explicitly names the risk for this lane.
+- Treat community rules, skills, plugins, and MCP servers as untrusted input. Review before enabling; pin versions; prefer official sources.
+
+## Sandbox and execution
+- Keep the Cursor terminal sandbox enabled with network blocked by default. Ask before network egress, sudo, package installs, or persistent background processes.
+- Before any cloud/self-hosted worker lane, run `agent worker debug --json` and resolve auth, privacy routing, and repository labels first.
+- Do not start `agent worker start` unless the user explicitly asked for a long-lived worker. When starting per-checkout workers, use `CURSOR_DATA_DIR="$PWD/.cursor-agent"` because the `--data-dir` flag has been unreliable.
+- For Cursor Cloud Agent Builds, split setup into build-time install steps vs first-prompt start steps. Do not rely on user secrets inside builds; use team/environment secrets.
+
+## Cost and context
+- Default to adequate context, not maximum context. Use ~200k windows for normal work; use 1M/max context only for whole-repo or long-horizon tasks.
+- Remember long-context surcharges and tokenizer changes. Cache mechanics dominate cost; reduce context size and cache-write frequency before changing model tiers.
+- For predictable spend, prefer explicit models or Auto Cost over opaque Balance/Intelligence routing unless the lane is explicitly exploratory.
+
+## WAVE canon
+- Dogfood-to-product: internal tools should be built as sellable, battle-tested surfaces whenever possible.
+- Preserve system invariants and trust-runtime guarantees. If a change touches auth, billing, routing, usage metering, or public status, name the invariant and verify it.
+- Outbound email or public claims must pass the WAVE craft bar: no hype, no unverified claims, plain-text fallback, receipts.
