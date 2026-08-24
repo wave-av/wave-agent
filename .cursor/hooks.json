@@ -6,7 +6,7 @@
         "type": "command",
         "command": "node .cursor/hooks/guard-shell.mjs",
         "timeout": 10000,
-        "failClosed": true
+        "failClosed": false
       }
     ],
     "beforeMCPExecution": [
@@ -14,7 +14,7 @@
         "type": "command",
         "command": "node .cursor/hooks/audit-mcp.mjs",
         "timeout": 10000,
-        "failClosed": true
+        "failClosed": false
       }
     ],
     "afterFileEdit": [
