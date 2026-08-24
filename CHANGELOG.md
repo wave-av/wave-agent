@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+
+- Added a WASM-embeddable core with exported budget, headroom, and canonical-ID checks.
+
 ### Fixed
 
 - `pr-agent` lane: fork-triggered `/` commands are now refused, and the AI
