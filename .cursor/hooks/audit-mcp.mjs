@@ -29,7 +29,7 @@ if (!denied) {
     ""
   );
 
-  const highRisk = /(?:delete|drop|destroy|admin|billing|payment|secret|credential|token|prod|production)/i.test(toolName);
+  const highRisk = /(?:\b(?:delete|drop|destroy|admin|billing|payment|secret|credential|token|prod|production|live)\b)/i.test(toolName);
   if (highRisk && process.env.CURSOR_HOOK_ALLOW_HIGH_RISK_MCP !== "1") {
     respond({
       permission: "deny",
