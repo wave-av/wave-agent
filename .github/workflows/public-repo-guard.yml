@@ -26,6 +26,7 @@ name: public-repo-guard
 
 on:
   pull_request:
+  merge_group:
   push:
     branches: [main, master]
   workflow_dispatch:
