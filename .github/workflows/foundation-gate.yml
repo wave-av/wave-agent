@@ -16,6 +16,7 @@ name: foundation-gate
 
 on:
   pull_request:
+  merge_group:
   push:
     branches: [main, master, staging]
 
