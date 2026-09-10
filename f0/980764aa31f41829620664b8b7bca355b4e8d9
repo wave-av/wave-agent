@@ -1,0 +1,19 @@
+go.mod
+  s_a9e024e8b1c883::t_2d58651cce19fa 3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.23",
+  "base_commit_sha": "f0980764aa31f41829620664b8b7bca355b4e8d9",
+  "prompts": {},
+  "sessions": {
+    "s_a9e024e8b1c883": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f76f34b79ffetXpOK6OuPG84N2",
+        "model": "mimo-v2.5-free"
+      },
+      "human_author": "Jake Fineman <jakefineman@gmail.com>"
+    }
+  }
+}
