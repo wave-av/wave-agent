@@ -8,6 +8,7 @@ All notable changes to this project are documented here. The format is based on
 
 ### Fixed
 
+- **fix(security, HIGH): authenticate the LAN management API and stop serializing the cloud token.** The daemon binds all interfaces as root with zero auth: `GET /api/config` and `/api/system` embedded the cloud token, and module install/stop plus config writes were anonymous. Reads stay open for the on-device dashboard, but the token is redacted from every response and all mutating routes require `Authorization: Bearer <device-token>` (constant-time compare; fail-open only while unprovisioned). Pinned by `httpapi_auth_test.go`.
 - `pr-agent` lane: fork-triggered `/` commands are now refused, and the AI
   call's budget fits inside its step. Three defects, one of them only visible
   once the first was fixed.
