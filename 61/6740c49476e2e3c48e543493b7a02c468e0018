@@ -1,0 +1,19 @@
+main.go
+  s_aaed2751ff676c::t_426ec67120a02e 126
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.23",
+  "base_commit_sha": "616740c49476e2e3c48e543493b7a02c468e0018",
+  "prompts": {},
+  "sessions": {
+    "s_aaed2751ff676c": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f63ffd6eeffezlQo2FA26sbavF",
+        "model": "muse-spark-1.3-contributor"
+      },
+      "human_author": "Jake Fineman <jakefineman@gmail.com>"
+    }
+  }
+}
