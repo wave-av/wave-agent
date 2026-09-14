@@ -55,6 +55,27 @@ func TestResolveUnderContainsPaths(t *testing.T) {
 	}
 }
 
+// TestWriteOwnerOnlyFileTightensExistingMode pins that overwriting an
+// already-provisioned 0644 device.json actually becomes owner-only.
+// os.WriteFile's perm is create-only, so a 0600 argument is a no-op on
+// the fleet files that already hold CloudToken.
+func TestWriteOwnerOnlyFileTightensExistingMode(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "device.json")
+	if err := os.WriteFile(p, []byte(`{"cloud_token":"old"}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeOwnerOnlyFile(p, []byte(`{"cloud_token":"new"}`)); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0600 {
+		t.Errorf("mode = %04o, want 0600", got)
+	}
+}
+
 // writeTempFile returns the path to a file holding body, plus its sha256.
 func writeTempFile(t *testing.T, body string) (string, string) {
 	t.Helper()

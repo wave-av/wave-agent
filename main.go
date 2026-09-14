@@ -98,6 +98,12 @@ func (a *Agent) Init() error {
 		if err := json.Unmarshal(data, &a.config); err != nil {
 			return fmt.Errorf("parse config: %w", err)
 		}
+		// WriteFile applies 0600 only on create. Devices upgrading from an
+		// older agent already have this file as 0644, so tighten it on load
+		// rather than waiting for a rewrite that never changes mode.
+		if err := os.Chmod(configPath, 0600); err != nil {
+			return fmt.Errorf("restrict config mode: %w", err)
+		}
 		log.Printf("Loaded device config: %s (%s)", a.config.DeviceID, a.config.Platform)
 	} else {
 		a.config = DeviceConfig{
@@ -123,7 +129,17 @@ func (a *Agent) saveConfig() error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(ConfigDir, "device.json"), data, 0600) // SEC-HARDENING (2026-09-14): token-bearing config is owner-only, never world-readable
+	return writeOwnerOnlyFile(filepath.Join(ConfigDir, "device.json"), data)
+}
+
+// writeOwnerOnlyFile writes data at 0600 and then chmod 0600. WriteFile
+// applies perm only when the file is created, so an existing 0644
+// device.json would otherwise keep CloudToken world-readable on overwrite.
+func writeOwnerOnlyFile(path string, data []byte) error {
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		return err
+	}
+	return os.Chmod(path, 0600)
 }
 
 // safeNamePattern is the allowlist for caller-supplied module and profile
