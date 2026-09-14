@@ -166,7 +166,7 @@ func (a *Agent) buildMux() *http.ServeMux {
 				return
 			}
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(a.config)
+			json.NewEncoder(w).Encode(a.sanitizedConfig())
 		default:
 			http.Error(w, "Method not allowed", 405)
 		}
