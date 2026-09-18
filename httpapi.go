@@ -3,6 +3,7 @@
 package main
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -10,7 +11,47 @@ import (
 	"time"
 )
 
-func (a *Agent) startHTTPServer(port int) *http.Server {
+// SEC-HARDENING (2026-09-14, HIGH): the LAN management API is reachable
+// unauthenticated (binds all interfaces, runs as root). Reads stay open for
+// the on-device dashboard, but (a) the cloud token is NEVER serialized and
+// (b) every mutating route requires the device Bearer token.
+
+// sanitizedConfig returns the device config with the cloud token stripped.
+// The token authenticates the device toward edge.wave.online; serving it on
+// an unauthenticated LAN endpoint leaks it to any network peer (and to every
+// browser that opens the dashboard, which polls /api/system).
+func (a *Agent) sanitizedConfig() DeviceConfig {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	c := a.config
+	c.CloudToken = ""
+	return c
+}
+
+// requireDeviceAuth gates mutating routes on the device Bearer token.
+// Fail-open ONLY while unprovisioned (no token exists yet, nothing to steal);
+// once provisioned, missing/wrong credentials are rejected.
+func (a *Agent) requireDeviceAuth(w http.ResponseWriter, r *http.Request) bool {
+	a.mu.RLock()
+	token := a.config.CloudToken
+	a.mu.RUnlock()
+	if token == "" {
+		return true
+	}
+	got := r.Header.Get("Authorization")
+	if got == "" {
+		http.Error(w, "missing Authorization: Bearer <device-token>", 401)
+		return false
+	}
+	want := "Bearer " + token
+	if subtle.ConstantTimeCompare([]byte(got), []byte(want)) != 1 {
+		http.Error(w, "forbidden", 403)
+		return false
+	}
+	return true
+}
+
+func (a *Agent) buildMux() *http.ServeMux {
 	mux := http.NewServeMux()
 
 	// Web UI (embedded dashboard)
@@ -26,10 +67,15 @@ func (a *Agent) startHTTPServer(port int) *http.Server {
 		})
 	})
 
-	// System info
+	// System info (token-redacted; the dashboard polls this every 5s)
 	mux.HandleFunc("/api/system", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(a.SystemInfo())
+		info := a.SystemInfo()
+		if dev, ok := info["device"].(DeviceConfig); ok {
+			dev.CloudToken = ""
+			info["device"] = dev
+		}
+		json.NewEncoder(w).Encode(info)
 	})
 
 	// Module list
@@ -46,10 +92,13 @@ func (a *Agent) startHTTPServer(port int) *http.Server {
 		json.NewEncoder(w).Encode(a.HealthCheck())
 	})
 
-	// Module install
+	// Module install (privileged: executes install.sh as root — device auth required)
 	mux.HandleFunc("/api/modules/install", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "Method not allowed", 405)
+			return
+		}
+		if !a.requireDeviceAuth(w, r) {
 			return
 		}
 		var req struct {
@@ -67,10 +116,13 @@ func (a *Agent) startHTTPServer(port int) *http.Server {
 		json.NewEncoder(w).Encode(map[string]string{"status": "installed", "module": req.Name})
 	})
 
-	// Module stop
+	// Module stop (privileged — device auth required)
 	mux.HandleFunc("/api/modules/stop", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "Method not allowed", 405)
+			return
+		}
+		if !a.requireDeviceAuth(w, r) {
 			return
 		}
 		var req struct {
@@ -88,13 +140,16 @@ func (a *Agent) startHTTPServer(port int) *http.Server {
 		json.NewEncoder(w).Encode(map[string]string{"status": "stopped", "module": req.Name})
 	})
 
-	// Device config
+	// Device config (reads: token-redacted; writes: device auth required)
 	mux.HandleFunc("/api/config", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(a.config)
+			json.NewEncoder(w).Encode(a.sanitizedConfig())
 		case http.MethodPut:
+			if !a.requireDeviceAuth(w, r) {
+				return
+			}
 			var updates map[string]string
 			if err := json.NewDecoder(r.Body).Decode(&updates); err != nil {
 				http.Error(w, err.Error(), 400)
@@ -146,9 +201,13 @@ func (a *Agent) startHTTPServer(port int) *http.Server {
 		}
 	})
 
+	return mux
+}
+
+func (a *Agent) startHTTPServer(port int) *http.Server {
 	server := &http.Server{
 		Addr:         fmt.Sprintf(":%d", port),
-		Handler:      mux,
+		Handler:      a.buildMux(),
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 10 * time.Second,
 	}

@@ -123,7 +123,7 @@ func (a *Agent) saveConfig() error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(ConfigDir, "device.json"), data, 0644)
+	return os.WriteFile(filepath.Join(ConfigDir, "device.json"), data, 0600) // SEC-HARDENING (2026-09-14): token-bearing config is owner-only, never world-readable
 }
 
 // safeNamePattern is the allowlist for caller-supplied module and profile
