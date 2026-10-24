@@ -8,6 +8,10 @@ All notable changes to this project are documented here. The format is based on
 
 ### Fixed
 
+- Builds use Go toolchain go1.26.10, which includes the standard library
+  crypto/x509 denylist for compromised intermediate certificates
+  (GO-2026-6809, CVE-2026-111943). The language line stays `go 1.26`.
+
 - `pr-agent` lane: fork-triggered `/` commands are now refused, and the AI
   call's budget fits inside its step. Three defects, one of them only visible
   once the first was fixed.
