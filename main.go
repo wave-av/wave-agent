@@ -235,6 +235,10 @@ func (a *Agent) InstallModule(name string) error {
 	// Run install script if it exists
 	if _, err := os.Stat(installScript); err == nil {
 		log.Printf("Installing module: %s", name)
+		validPath := regexp.MustCompile(`^[a-zA-Z0-9_\-\./]+$`)
+		if !validPath.MatchString(installScript) {
+			return fmt.Errorf("invalid input")
+		}
 		// Explicit argv — never a shell string. "--" stops bash from
 		// interpreting a script path as an option.
 		cmd := exec.CommandContext(a.ctx, "bash", "--", installScript)
