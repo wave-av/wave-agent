@@ -30,7 +30,7 @@ build-darwin:
 
 # Docker build (for CI)
 docker-build:
-	docker run --rm -v "$(PWD)":/app -w /app golang:1.23-alpine \
+	docker run --rm -v "$(PWD)":/app -w /app golang:1.26-alpine \
 		sh -c "CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags='$(LDFLAGS)' -o dist/$(BINARY)-linux-arm64 ."
 
 # Install on current device
