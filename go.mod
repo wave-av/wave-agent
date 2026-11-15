@@ -1,5 +1,5 @@
 module github.com/wave-av/wave-agent
 
-go 1.26
+go 1.26.10
 
 // No external dependencies — stdlib only for minimal binary size
